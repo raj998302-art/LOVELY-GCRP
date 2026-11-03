@@ -6,6 +6,8 @@
     <string name="login_username_hint">Username</string>
     <string name="login_button">Login</string>
     <string name="login_hint">Edit host/port in /storage/emulated/0/GRAND CITY RP/SAMP/settings.ini</string>
+    <string name="btn_connect">Connect</string>
+    <string name="btn_logs">Logs</string>
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">First Fragment</string>
     <string name="second_fragment_label">Second Fragment</string>

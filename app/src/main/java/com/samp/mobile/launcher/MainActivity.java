@@ -1,340 +1,278 @@
 package com.samp.mobile.launcher;
 
-import android.app.Activity;
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.os.AsyncTask;
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
+import android.os.Environment;
+import android.text.TextUtils;
 import android.util.Log;
-import android.view.LayoutInflater;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.ImageView;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.fragment.app.Fragment;
-import androidx.fragment.app.FragmentManager;
-import androidx.fragment.app.FragmentPagerAdapter;
-import androidx.lifecycle.Lifecycle;
-import androidx.lifecycle.LifecycleObserver;
-import androidx.lifecycle.OnLifecycleEvent;
-import androidx.lifecycle.ProcessLifecycleOwner;
-import androidx.recyclerview.widget.RecyclerView;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
-import com.android.volley.Response;
-import com.android.volley.VolleyError;
-import com.android.volley.toolbox.StringRequest;
-import com.android.volley.toolbox.Volley;
-import com.google.android.material.tabs.TabLayout;
-import com.joom.paranoid.Obfuscate;
 import com.samp.mobile.R;
-import com.samp.mobile.launcher.adapters.FavouriteServerAdapter;
-import com.samp.mobile.launcher.adapters.ServerAdapter;
-import com.samp.mobile.launcher.config.Config;
-import com.samp.mobile.launcher.data.FavoritesInfo;
-import com.samp.mobile.launcher.fragments.HomeFragment;
-import com.samp.mobile.launcher.fragments.ServerPagesItemFragment;
-import com.samp.mobile.launcher.fragments.ServersFragment;
-import com.samp.mobile.launcher.fragments.SettingsFragment;
-import com.samp.mobile.launcher.util.ConfigValidator;
-import com.samp.mobile.launcher.util.SAMPServerInfo;
-import com.samp.mobile.launcher.util.SampQueryAPI;
-import com.samp.mobile.launcher.util.SharedPreferenceCore;
-import com.samp.mobile.launcher.util.SignatureChecker;
-import com.samp.mobile.launcher.util.ViewPagerWithoutSwipe;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import com.samp.mobile.game.SAMP;
+import com.samp.mobile.launcher.util.LogUtil;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.net.DatagramSocket;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.Objects;
-import java.util.concurrent.TimeUnit;
-@Obfuscate
+import java.io.InputStream;
+import java.io.OutputStream;
+
+/**
+ * GRAND CITY RP - simple CRMP / SA-MP client entry screen.
+ *
+ * UI (exactly what was requested):
+ *   1. Username typing box (EditText)
+ *   2. Connect button -> saves username to settings.ini and connects to the server
+ *      (host/port read from settings.ini)
+ *   3. Logs button -> opens the client log view
+ *
+ * All game data lives in /storage/emulated/0/GRAND CITY RP/ (path forced in native code,
+ * see cpp/samp/game/hooks.cpp). Host, port and name are read from
+ * /storage/emulated/0/GRAND CITY RP/SAMP/settings.ini.
+ */
 public class MainActivity extends AppCompatActivity {
 
-    public String[] tabTitles = { "Servers", "Info", "Settings" };
-    public int[] tabImages = { R.drawable.ic_mainmenu, R.drawable.ic_server, R.drawable.ic_settingsmenu};
-    public int[] tabSelectedImages = { R.drawable.ic_mainmenu_on, R.drawable.ic_serveron, R.drawable.ic_settingsmenu_on};
+    private static final String TAG = "GCRPClient";
 
-    public static ArrayList<SAMPServerInfo> mServersList = new ArrayList<>();
-    public static ArrayList<SAMPServerInfo> mFavoriteServersList = new ArrayList<>();
+    public static final String GCRP_FOLDER = "/storage/emulated/0/GRAND CITY RP";
+    public static final String SETTINGS_FILE = GCRP_FOLDER + "/SAMP/settings.ini";
 
-    boolean bAdsInitialized = false;
+    private static final int REQ_ALL_FILES_ACCESS = 1001;
+    private static final int REQ_STORAGE_PERMISSION = 1002;
 
-    private int iCountQueue = 0;
-
-    private int retryAttempt;
-
-    int i1 = 0;
+    private EditText etUsername;
 
     @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        Config.currentContext = this;
+        LogUtil.log("App started");
 
-        mServersList = new ArrayList<>();
-        mFavoriteServersList = new ArrayList<>();
+        // On first launch, copy the bundled settings template into the storage folder
+        // so the user has a settings.ini to fill in with host/port/name.
+        copySettingsTemplateFromAssets();
 
-        ConfigValidator.validateConfigFiles(this);
+        etUsername = findViewById(R.id.et_username);
 
-        //if(!SignatureChecker.isSignatureValid(this, getPackageName()))
-        //{
-        //Toast.makeText(this, "Use original launcher! No remake", Toast.LENGTH_LONG).show();
-        //return;
-        //}
-
-
-        File file = new File(getExternalFilesDir(null) + "/download/update.apk");
-        if (file.exists()) {
-            file.delete();
+        // Pre-fill username if already saved in settings.ini
+        String savedName = readSetting("name");
+        if (!TextUtils.isEmpty(savedName)) {
+            etUsername.setText(savedName);
+            etUsername.setSelection(etUsername.getText().length());
         }
 
-        FragmentManager fm = getSupportFragmentManager();
-        ViewPagerAdapter sa = new ViewPagerAdapter(fm);
-        ViewPagerWithoutSwipe pa = findViewById(R.id.fragment_place);
-        pa.setAdapter(sa);
-
-        TabLayout tabLayout = findViewById(R.id.constraintLayout);
-
-        tabLayout.setupWithViewPager(pa);
-
-        for(int  i = 0; i < tabLayout.getTabCount(); i++)
-        {
-            View inflate = LayoutInflater.from(this).inflate(R.layout.tablayout_item, (ViewGroup) tabLayout, false);
-
-            ImageView image = inflate.findViewById(R.id.imageView2);
-            image.setBackgroundResource(tabImages[i]);
-
-            Objects.requireNonNull(tabLayout.getTabAt(i)).setCustomView(inflate);
-
-            tabLayout.clearOnTabSelectedListeners();
-            tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
-                @Override
-                public void onTabSelected(TabLayout.Tab tab) {
-                    getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-                    pa.setCurrentItem(tab.getPosition(), true);
-                    ((ImageView)tab.getCustomView().findViewById(R.id.imageView2)).setBackgroundResource(tabSelectedImages[tab.getPosition()]);
-                }
-
-                @Override
-                public void onTabUnselected(TabLayout.Tab tab) {
-                    ((ImageView)tab.getCustomView().findViewById(R.id.imageView2)).setBackgroundResource(tabImages[tab.getPosition()]);
-                }
-
-                @Override
-                public void onTabReselected(TabLayout.Tab tab) {
-
-                }
-            });
-
-        }
-        ((ImageView)tabLayout.getTabAt(0).getCustomView().findViewById(R.id.imageView2)).setBackgroundResource(tabSelectedImages[0]);
-
-        getServersInfo();
-        getFavoriteServersInfo();
-    }
-
-    public final ArrayList<SAMPServerInfo> getServerList() {
-        return mServersList;
-    }
-
-    public final ArrayList<SAMPServerInfo> getFavoriteServerList() {
-        return mFavoriteServersList;
-    }
-
-
-    public boolean getServersInfo()
-    {
-        final boolean[] z = {false};
-        Volley.newRequestQueue(getApplicationContext()).add(new StringRequest("https://samp-mobile.shop/hosted.json", new Response.Listener<String>() {
-
+        Button btnConnect = findViewById(R.id.btn_connect);
+        btnConnect.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onResponse(String response) {
-                try {
-                    JSONObject jsonObject  = new JSONObject(new String(response.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8));
-                    JSONArray jsonArray = jsonObject.getJSONArray("query");
-                    for(int i = 0; i<jsonArray.length(); i++) {
-                        JSONObject jSONObject = jsonArray.getJSONObject(i);
-                        SAMPServerInfo sAMPServerInfo = new SAMPServerInfo();
-                        sAMPServerInfo.setId(jSONObject.getInt("number"));
-                        sAMPServerInfo.setServerName(jSONObject.getString("name"));
-                        sAMPServerInfo.setAddress(jSONObject.getString("ip"));
-                        sAMPServerInfo.setPort(jSONObject.getInt("port"));
-                        sAMPServerInfo.setCurrentPlayerCount(jSONObject.getInt("online"));
-                        sAMPServerInfo.setMaxPlayerCount(jSONObject.getInt("maxplayers"));
-                        sAMPServerInfo.setHasPassword(jSONObject.getBoolean("password"));
-                        sAMPServerInfo.setServerStatus(SAMPServerInfo.Status.ONLINE);
-                        sAMPServerInfo.setPing(12);
-                        getServerList().add(sAMPServerInfo);
-                    }
-                } catch (JSONException e) {
-                    throw new RuntimeException(e);
-                }
-
-                for (Fragment fragment : getSupportFragmentManager().getFragments()) {
-                    if (fragment instanceof ServersFragment) {
-                        while (!fragment.isAdded()) {
-                            try {
-                                Thread.sleep(1000);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                        if(fragment.isAdded()) {
-                            for (Fragment fragment2 : fragment.getChildFragmentManager().getFragments()) {
-                                if ((fragment2 instanceof ServerPagesItemFragment) && ((ServerPagesItemFragment) fragment2).getPage() == 1 && fragment2.getView() != null) {
-                                    Log.d("AXL", "getserverslist");
-                                    ((RecyclerView.Adapter) Objects.requireNonNull(((RecyclerView) ((View) fragment2.requireView()).findViewById(R.id.server_recycler)).getAdapter())).notifyDataSetChanged();
-                                }
-                            }
-                        }
-                    }
-                }
-
-                z[0] = true;
+            public void onClick(View v) {
+                onConnect();
             }
-        }, new Response.ErrorListener() {
+        });
+
+        Button btnLogs = findViewById(R.id.btn_logs);
+        btnLogs.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onErrorResponse(VolleyError error) {
-                Log.d("x1y2z", "error " + error.toString());
-                getServersInfo();
-                z[0] = false;
+            public void onClick(View v) {
+                LogUtil.log("Logs opened");
+                startActivity(new Intent(MainActivity.this, LogsActivity.class));
             }
-        }));
-
-        return z[0];
+        });
     }
 
-    public void getFavoriteServersInfo()
-    {
-        for(int i = 0; i< FavoritesInfo.getServerList(this).size(); i++)
-        {
-            SAMPServerInfo serverInfo = new SAMPServerInfo(i, i, "Loading...", FavoritesInfo.getServerList(this).get(i).ip, FavoritesInfo.getServerList(this).get(i).port, 0, 0, 0, 0, 0, "English");
-            serverInfo.setFavorite(true);
-            serverInfo.setQueried(false);
-            getFavoriteServerList().add(serverInfo);
-            new ProcessInfo().execute(i);
+    private void onConnect() {
+        if (!ensureStorageReady()) {
+            return;
         }
 
-        refreshFavoriteServers();
-    }
+        String username = etUsername.getText().toString().trim();
+        if (TextUtils.isEmpty(username)) {
+            username = "Nick_Name";
+        }
+        // Save the username into settings.ini (read by native CSettings on connect).
+        writeSetting("name", username);
+        LogUtil.log("Username saved: " + username);
 
-    public class ProcessInfo extends AsyncTask<Integer, Void, Void> {
-        public Void doInBackground(Integer... numArr) {
-            int intValue = numArr[0].intValue();
-            if(getFavoriteServerList().size() > intValue) {
-                if(!getFavoriteServerList().get(intValue).getQueried()) {
-                    SampQueryAPI sampQuery = new SampQueryAPI(getFavoriteServerList().get(intValue).getAddress(), getFavoriteServerList().get(intValue).getPort());
-                    if (!sampQuery.mo7166d()) {
-                        return null;
-                    }
-                    String[] info = sampQuery.mo7164b();
-                    getFavoriteServerList().set(intValue, new SAMPServerInfo(intValue, intValue, info[3], getFavoriteServerList().get(intValue).getAddress(), getFavoriteServerList().get(intValue).getPort(), Integer.parseInt(info[1]), Integer.parseInt(info[2]), Integer.parseInt(info[0]), 0, 0, info[5]));
-                    DatagramSocket datagramSocket = sampQuery.f7277a;
-                    if (datagramSocket != null) {
-                        datagramSocket.close();
-                    }
-                    getFavoriteServerList().get(intValue).setQueried(true);
-
-                    refreshFavoriteServers();
-                }
-                else
-                    return null;
-            }
-            return null;
+        // Host and port must already be set by the user in settings.ini.
+        String host = readSetting("host");
+        String port = readSetting("port");
+        if (TextUtils.isEmpty(host) || TextUtils.isEmpty(port)) {
+            Toast.makeText(MainActivity.this,
+                    "Please set host and port in " + SETTINGS_FILE,
+                    Toast.LENGTH_LONG).show();
+            LogUtil.log("Connect aborted: host/port not set in settings.ini");
+            return;
         }
 
-        public void onPostExecute(Void r1) {
-            super.onPostExecute(r1);
-        }
-    }
+        LogUtil.log("Connecting to " + host + ":" + port + " as " + username);
 
-    public void refreshFavoriteServers()
-    {
-        for (Fragment fragment : getSupportFragmentManager().getFragments()) {
-            if (fragment instanceof ServersFragment) {
-                while (!fragment.isAdded()) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                if(fragment.isAdded()) {
-                    for (Fragment fragment2 : fragment.getChildFragmentManager().getFragments()) {
-                        if ((fragment2 instanceof ServerPagesItemFragment) && ((ServerPagesItemFragment) fragment2).getPage() == 0 && fragment2 != null) {
-                            RecyclerView view = Objects.requireNonNull( fragment2.requireView().findViewById(R.id.server_recycler));
-                            if(view != null) {
-                                RecyclerView.Adapter adapter = view.getAdapter();
-                                if(adapter != null) {
-                                    view.post(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            adapter.notifyDataSetChanged();
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    public static void hideKeyboard(Activity activity) {
-        InputMethodManager inputManager = (InputMethodManager) activity
-                .getSystemService(Context.INPUT_METHOD_SERVICE);
-
-        // check if no view has focus:
-        View currentFocusedView = activity.getCurrentFocus();
-        if (currentFocusedView != null) {
-            inputManager.hideSoftInputFromWindow(currentFocusedView.getWindowToken(), InputMethodManager.HIDE_NOT_ALWAYS);
-        }
-    }
-
-    public class ViewPagerAdapter extends FragmentPagerAdapter {
-
-        public ViewPagerAdapter(FragmentManager fragmentManager) {
-            super(fragmentManager);
-        }
-
-        @NonNull
-        @Override
-        public Fragment getItem(int position) {
-            if(position == 1)
-                return new ServersFragment();
-            else if(position == 0)
-                return new HomeFragment();
-            else if(position == 2)
-                return new SettingsFragment();
-            return new HomeFragment();
-        }
-
-        @Override
-        public int getCount() {
-            return 3;
-        }
+        // Launch the CRMP / SA-MP game client (reads host/port/name from settings.ini).
+        startActivity(new Intent(MainActivity.this, SAMP.class));
     }
 
     @Override
-    public void onBackPressed() {
-        super.onBackPressed();
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        // User came back from the "All files access" settings page.
+        // Storage will be re-checked on the next Connect click.
+    }
+
+    /**
+     * Make sure we can read/write /storage/emulated/0/GRAND CITY RP/SAMP/settings.ini.
+     */
+    private boolean ensureStorageReady() {
+        File folder = new File(GCRP_FOLDER + "/SAMP");
+        if (!folder.exists()) {
+            boolean created = folder.mkdirs();
+            if (!created) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                        && !Environment.isExternalStorageManager()) {
+                    Toast.makeText(MainActivity.this,
+                            "Grant 'All files access' to create " + GCRP_FOLDER,
+                            Toast.LENGTH_LONG).show();
+                    openAllFilesAccessSettings();
+                    return false;
+                }
+                Toast.makeText(MainActivity.this, "Cannot create " + GCRP_FOLDER + "/SAMP",
+                        Toast.LENGTH_LONG).show();
+                return false;
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && !Environment.isExternalStorageManager()) {
+            Toast.makeText(MainActivity.this,
+                    "Grant 'All files access' to write to " + GCRP_FOLDER,
+                    Toast.LENGTH_LONG).show();
+            openAllFilesAccessSettings();
+            return false;
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                            Manifest.permission.READ_EXTERNAL_STORAGE},
+                    REQ_STORAGE_PERMISSION);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void openAllFilesAccessSettings() {
+        Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+        startActivityForResult(intent, REQ_ALL_FILES_ACCESS);
+    }
+
+    /**
+     * Copy assets/settings.ini to the storage folder if it does not exist yet.
+     */
+    private void copySettingsTemplateFromAssets() {
+        File dest = new File(SETTINGS_FILE);
+        if (dest.exists()) {
+            return;
+        }
+        dest.getParentFile().mkdirs();
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            in = getAssets().open("settings.ini");
+            out = new FileWriter(dest);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            LogUtil.log("Copied settings template to " + SETTINGS_FILE);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to copy settings template", e);
+        } finally {
+            try {
+                if (in != null) in.close();
+            } catch (IOException ignored) {
+            }
+            try {
+                if (out != null) out.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private String readSetting(String key) {
+        File file = new File(SETTINGS_FILE);
+        if (!file.exists()) {
+            return "";
+        }
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#") || line.startsWith("[")) {
+                    continue;
+                }
+                int idx = line.indexOf('=');
+                if (idx < 0) {
+                    continue;
+                }
+                String k = line.substring(0, idx).trim();
+                String v = line.substring(idx + 1).trim();
+                if (k.equalsIgnoreCase(key)) {
+                    return v;
+                }
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to read settings", e);
+        }
+        return "";
+    }
+
+    private void writeSetting(String key, String value) {
+        File file = new File(SETTINGS_FILE);
+        file.getParentFile().mkdirs();
+        StringBuilder content = new StringBuilder();
+        boolean found = false;
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty() && !trimmed.startsWith("#") && !trimmed.startsWith("[")) {
+                    int idx = line.indexOf('=');
+                    if (idx >= 0 && line.substring(0, idx).trim().equalsIgnoreCase(key)) {
+                        content.append(key).append(" = ").append(value).append("\n");
+                        found = true;
+                        continue;
+                    }
+                }
+                content.append(line).append("\n");
+            }
+        } catch (IOException ignored) {
+            // file may not exist yet
+        }
+        if (!found) {
+            content.append(key).append(" = ").append(value).append("\n");
+        }
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+            bw.write(content.toString());
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to write settings", e);
+        }
     }
 }

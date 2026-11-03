@@ -5,6 +5,9 @@ plugins {
 }
 
 android {
+    // Local keystore (not part of this repo). Provide it for signed release builds.
+    def releaseKeystore = file("../../keys/new.jks")
+
     signingConfigs {
         debug {
             storeFile file("../../keys/new.jks")
@@ -13,10 +16,12 @@ android {
             keyPassword "123123"
         }
         release {
-            storeFile file("../../keys/new.jks")
-            storePassword "123123"
-            keyAlias "key0"
-            keyPassword "123123"
+            if (releaseKeystore.exists()) {
+                storeFile releaseKeystore
+                storePassword "123123"
+                keyAlias "key0"
+                keyPassword "123123"
+            }
         }
     }
     compileSdk 34
@@ -56,6 +61,10 @@ android {
         }
     }
 
+    // Sign release only when a keystore is available (CI without the keystore
+    // produces an unsigned APK that can be signed later with your keystore).
+    def releaseSigning = releaseKeystore.exists() ? signingConfigs.release : null
+
     buildTypes {
         debug {
             debuggable false
@@ -79,7 +88,9 @@ android {
             jniDebuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            if (releaseSigning != null) {
+                signingConfig releaseSigning
+            }
         }
         all{
             multiDexEnabled true

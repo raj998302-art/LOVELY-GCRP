@@ -66,9 +66,9 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-    <!-- Simple CRMP client login screen (replaces the launcher UI). -->
+    <!-- GRAND CITY RP simple client entry: username + Connect + Logs. -->
     <activity
-        android:name=".launcher.LoginActivity"
+        android:name=".launcher.MainActivity"
         android:screenOrientation="portrait"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
         android:windowSoftInputMode="adjustResize"
@@ -87,13 +87,6 @@
         android:launchMode="singleTask"
         android:windowSoftInputMode="adjustPan"
         android:exported="true">
-    </activity>
-
-    <activity
-        android:name=".launcher.MainActivity"
-        android:screenOrientation="portrait"
-        android:theme="@style/Theme.AppCompat.NoActionBar"
-        android:windowSoftInputMode="adjustNothing">
     </activity>
 
     <activity
