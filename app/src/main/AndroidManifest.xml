@@ -71,7 +71,7 @@
         android:name=".launcher.MainActivity"
         android:screenOrientation="portrait"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
-        android:windowSoftInputMode="adjustResize"
+        android:windowSoftInputMode="adjustNothing"
         android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />

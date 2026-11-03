@@ -2,6 +2,7 @@ package com.samp.mobile.launcher;
 
 import android.os.Bundle;
 import android.text.method.ScrollingMovementMethod;
+import android.util.Log;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -15,13 +16,28 @@ import com.samp.mobile.launcher.util.LogUtil;
  */
 public class LogsActivity extends AppCompatActivity {
 
+    private static final String TAG = "GCRPLogs";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_logs);
+        try {
+            setContentView(R.layout.activity_logs);
+        } catch (Exception e) {
+            Log.e(TAG, "setContentView failed", e);
+            finish();
+            return;
+        }
 
         TextView tvLogs = findViewById(R.id.tv_logs);
-        tvLogs.setMovementMethod(new ScrollingMovementMethod());
-        tvLogs.setText(LogUtil.read());
+        if (tvLogs != null) {
+            try {
+                tvLogs.setMovementMethod(new ScrollingMovementMethod());
+                tvLogs.setText(LogUtil.read());
+            } catch (Exception e) {
+                Log.e(TAG, "load log text failed", e);
+                tvLogs.setText("Error loading log: " + e.getMessage() + "\n");
+            }
+        }
     }
 }
